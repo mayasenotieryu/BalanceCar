@@ -6,7 +6,7 @@
 #include <Wire.h>
 
 Adafruit_MPU6050 mpu;
-sensor_event_t a, g, temp; // acceleration, vitesse du gyropode, température
+sensors_event_t a, g, temp; // acceleration, vitesse du gyropode, température
 
 char FlagCalcul = 0; // flag pour indiquer que les grandeurs ont été lues et que le calcul peut être effectué par la fonction contrôle
 float Te = 5;        // période d'échantillonage en ms
@@ -48,7 +48,6 @@ void setup()
         10,         // tres haut niveau de priorite
         NULL        // descripteur
     );
-
     // Try to initialize de la librarie MPU6050
     if (!mpu.begin())
     {
@@ -67,7 +66,6 @@ void setup()
 
 void reception(char ch)
 {
-
     static int i = 0;
     static String chaine = "";
     String commande;
@@ -119,7 +117,7 @@ void loop()
 
     FlagCalcul = 0;
 }
-}
+
 
 void serialEvent()
 {
