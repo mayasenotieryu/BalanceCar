@@ -113,12 +113,20 @@ void reception(char ch)
 void loop()
 {
     if (FlagCalcul == 1)
+    {   //avant filtrage
+        //Serial.printf("%lf %lf %lf \n", tetagr, tetaomg, g.gyro.z);
+        //g.gyro.z est la vitesse du gyropode mesurée par le capteur gyroscopique
+        // tetaomg est la vitesse du gyropode filtrée  
+        //tetagr est l'angle de gravité mesuré par l'accéléromètre }
+
         // affichage des angles en radians
-        Serial.printf("%lf %lf %lf %lf \n", tetagr, tetaomg, tetaF, tetaomg + tetagr);
+        Serial.printf("%lf %lf %lf %lf \n", tetagr, tetaF, tetaomg, tetaomg + tetagr);
+    }
+   
+
 
     FlagCalcul = 0;
 }
-
 
 void serialEvent()
 {
