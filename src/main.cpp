@@ -40,14 +40,6 @@ void setup()
     Serial.begin(115200);
     Serial.printf("Bonjour \n\r");
 
-    xTaskCreate(
-        controle,   // nom de la fonction
-        "controle", // nom de la tache que nous venons de vréer
-        10000,      // taille de la pile en octet
-        NULL,       // parametre
-        10,         // tres haut niveau de priorite
-        NULL        // descripteur
-    );
     // Try to initialize de la librarie MPU6050
     if (!mpu.begin())
     {
@@ -58,6 +50,15 @@ void setup()
         }
     }
     Serial.println("MPU6050 Found!");
+
+    xTaskCreate(
+        controle,   // nom de la fonction
+        "controle", // nom de la tache que nous venons de vréer
+        10000,      // taille de la pile en octet
+        NULL,       // parametre
+        10,         // tres haut niveau de priorite
+        NULL        // descripteur
+    );
 
     // calcul coeff filtre
     A = 1 / (1 + Tau / Te);
