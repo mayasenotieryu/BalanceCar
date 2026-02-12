@@ -13,7 +13,7 @@ float Te = 5;        // période d'échantillonage en ms
 float Tau = 1000;    // constante de temps du filtre en ms
 
 // mesure du MPU
-float tetagr, tetaomg, tetaF; // angle de gravité mesuré par accéléromètre, angle  ,angle une fois filtré
+float tetagr, tetaomg, tetaF; // angle de gravité mesuré par accéléromètre, angle, angle une fois filtré
 
 // coefficient du filtre
 float A, B;
