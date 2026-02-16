@@ -1,54 +1,31 @@
 #include <Arduino.h>
+#include "IMU.h"
+#include "Encoder.h"
 
-// ================= 编码器引脚 =================
-#define PULSE_L 35
-#define DIR_L   34
-#define PULSE_R 36
-#define DIR_R   39
+// ================= 电机引脚 =================
+#define G_IN1 17
+#define G_IN2 18
+#define D_IN1 16
+#define D_IN2 4
 
-// ================= PWM 引脚 =================
-#define G_IN1  17
-#define G_IN2  18
-#define D_IN1  16
-#define D_IN2  4
+#define CH_G1 0
+#define CH_G2 1
+#define CH_D1 2
+#define CH_D2 3
 
-#define CH_G1  0
-#define CH_G2  1
-#define CH_D1  2
-#define CH_D2  3
+// 方向补偿（根据你之前结构）
+#define LEFT_SIGN   1
+#define RIGHT_SIGN -1
 
-// ================= 方向符号补偿 =================
-// 定义：正PWM = 小车向前
-#define LEFT_SIGN   -1 
-#define RIGHT_SIGN  1   
+// ================= 控制参数 =================
+float Kp = 18.0;     // 先小一点
+float Kd = 0.6;      // 阻尼
 
-// ================= 参数 =================
-#define PPR_TOTAL 12
-#define SAMPLE_TIME 100
-#define WHEEL_DIAMETER 0.065
+IMU imu;
+Encoder encoder;
 
-// ================= 全局变量 =================
-volatile long countLeft = 0;
-volatile long countRight = 0;
-
-// ================= 编码器中断 =================
-void IRAM_ATTR ISR_Left() {
-    if (digitalRead(DIR_L))
-        countLeft++;
-    else
-        countLeft--;
-}
-
-void IRAM_ATTR ISR_Right() {
-    if (digitalRead(DIR_R))
-        countRight--;
-    else
-        countRight++;
-}
-
-// ================= 底层电机驱动（纯PWM） =================
+// ================= 电机底层驱动 =================
 void driveLeftRaw(int duty) {
-
     if (duty >= 0) {
         ledcWrite(CH_G1, duty);
         ledcWrite(CH_G2, 0);
@@ -59,7 +36,6 @@ void driveLeftRaw(int duty) {
 }
 
 void driveRightRaw(int duty) {
-
     if (duty >= 0) {
         ledcWrite(CH_D1, duty);
         ledcWrite(CH_D2, 0);
@@ -69,22 +45,19 @@ void driveRightRaw(int duty) {
     }
 }
 
-// ================= 对外统一接口 =================
-void setMotor(int left, int right) {
+void setMotor(int pwm) {
 
-    // 方向补偿在这里统一处理
-    left  = LEFT_SIGN  * left;
-    right = RIGHT_SIGN * right;
+    pwm = constrain(pwm, -255, 255);
 
-    left  = constrain(left,  -255, 255);
-    right = constrain(right, -255, 255);
+    int left  = LEFT_SIGN  * pwm;
+    int right = RIGHT_SIGN * pwm;
 
     driveLeftRaw(left);
     driveRightRaw(right);
 }
 
 void motorStop() {
-    setMotor(0, 0);
+    setMotor(0);
 }
 
 // ================= 初始化 =================
@@ -92,104 +65,54 @@ void setup() {
 
     Serial.begin(115200);
 
-    // 编码器
-    pinMode(PULSE_L, INPUT);
-    pinMode(DIR_L, INPUT);
-    pinMode(PULSE_R, INPUT);
-    pinMode(DIR_R, INPUT);
+    // IMU 初始化
+    if (!imu.begin()) {
+        Serial.println("MPU6050 not found!");
+        while(1);
+    }
 
-    attachInterrupt(digitalPinToInterrupt(PULSE_L), ISR_Left, RISING);
-    attachInterrupt(digitalPinToInterrupt(PULSE_R), ISR_Right, RISING);
+    imu.startTask();
 
-    // PWM
-    ledcSetup(CH_G1, 1000, 8);
-    ledcSetup(CH_G2, 1000, 8);
-    ledcSetup(CH_D1, 1000, 8);
-    ledcSetup(CH_D2, 1000, 8);
+    // PWM 初始化
+    ledcSetup(CH_G1, 20000, 8);
+    ledcSetup(CH_G2, 20000, 8);
+    ledcSetup(CH_D1, 20000, 8);
+    ledcSetup(CH_D2, 20000, 8);
 
     ledcAttachPin(G_IN1, CH_G1);
     ledcAttachPin(G_IN2, CH_G2);
     ledcAttachPin(D_IN1, CH_D1);
     ledcAttachPin(D_IN2, CH_D2);
+
+    Serial.println("Balance test ready");
 }
 
 // ================= 主循环 =================
 void loop() {
 
-    static unsigned long lastMotorSwitch = 0;
-    static int motorState = 0;
+    // 读取姿态
+    float angle = imu.getAngle();      // rad
+    float gyro  = imu.getGyroZ();      // rad/s
 
-    static long lastL = 0;
-    static long lastR = 0;
+    // ===== PD 控制 =====
+    float pwmFloat = -Kp * angle - Kd * gyro;
+    int pwm = (int)pwmFloat;
 
-    unsigned long now = millis();
-
-    // ===== 电机测试状态机 =====
-    if (now - lastMotorSwitch > 3000) {
-        lastMotorSwitch = now;
-        motorState++;
-
-        if (motorState > 3) motorState = 0;
-
-        switch (motorState) {
-            case 0:
-                Serial.println("Forward");
-                setMotor(180, 180);  // 统一前进
-                break;
-
-            case 1:
-                Serial.println("Stop");
-                motorStop();
-                break;
-
-            case 2:
-                Serial.println("Backward");
-                setMotor(-180, -180); // 统一后退
-                break;
-
-            case 3:
-                Serial.println("Stop");
-                motorStop();
-                break;
-        }
+    // ===== 安全保护 =====
+    if (abs(angle) > 0.7) {   // ≈ 40°
+        motorStop();
+        Serial.println("Angle limit exceeded");
+    } else {
+        setMotor(pwm);
     }
 
-    // ===== 速度计算 =====
-    static unsigned long lastSpeedTime = 0;
+    // 调试输出
+    Serial.print("Angle(rad): ");
+    Serial.print(angle);
+    Serial.print("  Gyro(rad/s): ");
+    Serial.print(gyro);
+    Serial.print("  PWM: ");
+    Serial.println(pwm);
 
-    if (now - lastSpeedTime >= SAMPLE_TIME) {
-        lastSpeedTime = now;
-
-        noInterrupts();
-        long nowL = countLeft;
-        long nowR = countRight;
-        interrupts();
-
-        long deltaL = nowL - lastL;
-        long deltaR = nowR - lastR;
-
-        lastL = nowL;
-        lastR = nowR;
-
-        float rpmL = deltaL * 50.0;
-        float rpmR = deltaR * 50.0;
-
-        float wheelCirc = 3.1416 * WHEEL_DIAMETER;
-        float speedL = (rpmL / 60.0) * wheelCirc;
-        float speedR = (rpmR / 60.0) * wheelCirc;
-
-        Serial.print("L_count: ");
-        Serial.print(nowL);
-        Serial.print("  RPM_L: ");
-        Serial.print(rpmL);
-        Serial.print("  V_L: ");
-        Serial.print(speedL);
-
-        Serial.print("   |   R_count: ");
-        Serial.print(nowR);
-        Serial.print("  RPM_R: ");
-        Serial.print(rpmR);
-        Serial.print("  V_R: ");
-        Serial.println(speedR);
-    }
+    delay(5);  // 与 IMU 200Hz 同步
 }
