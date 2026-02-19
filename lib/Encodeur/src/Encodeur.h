@@ -3,9 +3,9 @@
 
 #include <Arduino.h>
 
-class Encoder {
+class Encodeur {
 public:
-    Encoder();
+    Encodeur();
 
     void begin();
     void update();

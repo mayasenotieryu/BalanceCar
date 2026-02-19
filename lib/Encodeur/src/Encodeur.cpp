@@ -1,28 +1,28 @@
-#include "Encoder.h"
+#include "Encodeur.h"
 
-volatile long Encoder::countLeft = 0;
-volatile long Encoder::countRight = 0;
+volatile long Encodeur::countLeft = 0;
+volatile long Encodeur::countRight = 0;
 
-Encoder::Encoder()
+Encodeur::Encodeur()
 : lastL(0), lastR(0),
   rpmL(0), rpmR(0),
   speedL(0), speedR(0) {}
 
-void IRAM_ATTR Encoder::isrLeft() {
+void IRAM_ATTR Encodeur::isrLeft() {
     if (digitalRead(DIR_L))
         countLeft++;
     else
         countLeft--;
 }
 
-void IRAM_ATTR Encoder::isrRight() {
+void IRAM_ATTR Encodeur::isrRight() {
     if (digitalRead(DIR_R))
         countRight--;
     else
         countRight++;
 }
 
-void Encoder::begin() {
+void Encodeur::begin() {
 
     pinMode(PULSE_L, INPUT);
     pinMode(DIR_L, INPUT);
@@ -33,7 +33,7 @@ void Encoder::begin() {
     attachInterrupt(digitalPinToInterrupt(PULSE_R), isrRight, RISING);
 }
 
-void Encoder::update() {
+void Encodeur::update() {
 
     noInterrupts();
     long nowL = countLeft;
@@ -54,7 +54,7 @@ void Encoder::update() {
     speedR = (rpmR / 60.0) * wheelCirc;
 }
 
-float Encoder::getRPM_L() { return rpmL; }
-float Encoder::getRPM_R() { return rpmR; }
-float Encoder::getSpeed_L() { return speedL; }
-float Encoder::getSpeed_R() { return speedR; }
+float Encodeur::getRPM_L() { return rpmL; }
+float Encodeur::getRPM_R() { return rpmR; }
+float Encodeur::getSpeed_L() { return speedL; }
+float Encodeur::getSpeed_R() { return speedR; }
