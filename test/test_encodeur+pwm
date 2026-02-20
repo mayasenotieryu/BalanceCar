@@ -20,7 +20,7 @@
 float Kp = 25.0;     // 先偏大一点
 float Kd = 1.2;      // 阻尼增强
 
-// 直立平衡角（你测得）
+// 直立平衡角
 float theta_eq = 1.56;
 
 IMU imu;
@@ -93,7 +93,7 @@ void setup() {
 void loop() {
 
     float angle = imu.getAngle();      // rad
-    float gyro  = imu.getGyroY();      // 你已经改成Y轴
+    float gyro  = imu.getGyroY();      // rad/s
 
     // ===== 平衡误差 =====
     float error = angle - theta_eq;

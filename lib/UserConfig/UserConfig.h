@@ -42,5 +42,11 @@
 
 #define MONITOR_MODE 0 // 0:关闭 1:开启
 
+
+
+
+
+#define LEFT_SIGN   -1
+#define RIGHT_SIGN  1  
 /*-------------------------------------------------------------*/
 #endif
