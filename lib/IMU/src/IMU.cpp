@@ -12,18 +12,18 @@ IMU::IMU()
 
 bool IMU::begin() {
 
-    Wire.begin(21, 22);  // ESP32 I2C 默认
+    Wire.begin(21, 22);  // ESP32 I2C 
 
     if (!mpu.begin())
         return false;
 
-    // 可选：设置陀螺范围
+    // 设置陀螺范围
     mpu.setGyroRange(MPU6050_RANGE_250_DEG);
 
-    // 可选：设置加速度范围
+    // 设置加速度范围
     mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
 
-    // 可选：设置低通滤波
+    // 设置低通滤波
     mpu.setFilterBandwidth(MPU6050_BAND_44_HZ);
 
     return true;
@@ -59,19 +59,19 @@ void IMU::update() {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
 
-    // 1️⃣ 加速度计算角度（安全写法）
+    // 1️ 加速度计算角度
     tetagr = atan2(a.acceleration.x, a.acceleration.y);
 
-    // 2️⃣ 计算时间步长
+    // 2️ 计算时间步长
     float dt = Te / 1000.0;
 
-    // 3️⃣ 保存陀螺数据
+    // 3️ 保存陀螺数据
     lastGyroZ = g.gyro.z;
 
-    // 4️⃣ 陀螺积分
+    // 4️ 陀螺积分
     float gyroAngle = tetaF + lastGyroZ * dt;
 
-    // 5️⃣ 互补滤波融合
+    // 5️ 互补滤波融合
     tetaF = alpha * gyroAngle + (1.0 - alpha) * tetagr;
 
     newData = true;

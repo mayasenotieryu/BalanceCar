@@ -1,13 +1,13 @@
 #include "PWM.h"
 
-// ================= 构造函数 =================
+// ================= Create Fonction =================
 PWM::PWM(int deadLeft, int deadRight)
 {
     DEAD_L = deadLeft;
     DEAD_R = deadRight;
 }
 
-// ================= 初始化 =================
+// ================= Init =================
 void PWM::begin()
 {
     ledcSetup(CH_G1, 20000, PWM_RESOLUTION);
@@ -21,7 +21,7 @@ void PWM::begin()
     ledcAttachPin(D_IN2, CH_D2);
 }
 
-// ================= symmetric 驱动 =================
+// ================= symmetric drive =================
 void PWM::driveLeft(int alpha)
 {
     alpha = constrain(alpha, -ALPHA_MAX, ALPHA_MAX);
@@ -44,7 +44,7 @@ void PWM::driveRight(int alpha)
     ledcWrite(CH_D2, in2);
 }
 
-// ================= 死区补偿 =================
+// ================= Deadzone =================
 int PWM::deadzoneShift(int u, int D)
 {
     if (u == 0)
@@ -58,7 +58,7 @@ int PWM::deadzoneShift(int u, int D)
     return constrain(u, -PWM_MAX, PWM_MAX);
 }
 
-// ================= 外部接口 =================
+// ================= Outside interface =================
 void PWM::setSpeed(int speed)
 {
     int speed_l = constrain(deadzoneShift(speed, DEAD_L), -1000, 1000);
