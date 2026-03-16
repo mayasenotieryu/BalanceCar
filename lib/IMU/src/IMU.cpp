@@ -2,35 +2,33 @@
 #include <Wire.h>
 
 IMU::IMU()
-: tetagr(0),
-  tetaF(0),
-  lastGyroZ(0),
-  Te(5),          // 5ms采样周期
-  alpha(0.98),    // 互补滤波系数
+: tetagr(0.0f),
+  tetaF(0.0f),
+  lastGyroZ(0.0f),
+  Te_ms(5.0f),
+  Tau_ms(1000.0f),
+  alpha(0.0f),
   newData(false)
 {}
 
-bool IMU::begin() {
-
-    Wire.begin(21, 22);  // ESP32 I2C 
+bool IMU::begin()
+{
+    Wire.begin(21, 22);
 
     if (!mpu.begin())
         return false;
 
-    // 设置陀螺范围
     mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-
-    // 设置加速度范围
     mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
-
-    // 设置低通滤波
     mpu.setFilterBandwidth(MPU6050_BAND_44_HZ);
+
+    alpha = Tau_ms / (Tau_ms + Te_ms);
 
     return true;
 }
 
-void IMU::startTask() {
-
+void IMU::startTask()
+{
     xTaskCreate(
         taskWrapper,
         "IMU_Task",
@@ -41,50 +39,64 @@ void IMU::startTask() {
     );
 }
 
-void IMU::taskWrapper(void *param) {
-
+void IMU::taskWrapper(void *param)
+{
     IMU *imu = static_cast<IMU*>(param);
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    while (1) {
-
+    while (1)
+    {
         imu->update();
-
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(imu->Te));
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS((uint32_t)imu->Te_ms));
     }
 }
 
-void IMU::update() {
-
+void IMU::update()
+{
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
 
-    // 1️ 加速度计算角度
     tetagr = atan2(a.acceleration.x, a.acceleration.y);
 
-    // 2️ 计算时间步长
-    float dt = Te / 1000.0;
+    float dt = Te_ms / 1000.0f;
 
-    // 3️ 保存陀螺数据
     lastGyroZ = g.gyro.z;
-
-    // 4️ 陀螺积分
     float gyroAngle = tetaF + lastGyroZ * dt;
 
-    // 5️ 互补滤波融合
-    tetaF = alpha * gyroAngle + (1.0 - alpha) * tetagr;
+    tetaF = alpha * gyroAngle + (1.0f - alpha) * tetagr;
 
     newData = true;
 }
 
-float IMU::getAngle() {
+float IMU::getAngle()
+{
     return tetaF;
 }
 
-float IMU::getAccAngle() {
+float IMU::getAccAngle()
+{
     return tetagr;
 }
 
-float IMU::getGyroZ() {
+float IMU::getGyroZ()
+{
     return lastGyroZ;
+}
+
+void IMU::setTeMs(float te_ms)
+{
+    if (te_ms < 1.0f) te_ms = 1.0f;
+    if (te_ms > 100.0f) te_ms = 100.0f;
+
+    Te_ms = te_ms;
+    alpha = Tau_ms / (Tau_ms + Te_ms);
+}
+
+void IMU::setTauMs(float tau_ms)
+{
+    if (tau_ms < 1.0f) tau_ms = 1.0f;
+    if (tau_ms > 10000.0f) tau_ms = 10000.0f;
+
+    Tau_ms = tau_ms;
+    alpha = Tau_ms / (Tau_ms + Te_ms);
 }

@@ -7,23 +7,49 @@ IMU imu;
 Encodeur encodeur;
 PWM pwm(470, 430);   // motor dead zone
 
+// ================= Compatibility Parameters =================
+// Keep old platform semantics:
+// Te = sampling period in ms
+// Tau = filter time constant in ms
+
+float Te = 5.0f;        // ms
+float Tau = 1000.0f;    // ms
+
 // ================= Control Parameters =================
 
 // ---- Angle Loop ----
-float Kp_theta = 180.0;
-float Kd_theta = 0.2;
+float Kp_theta = 180.0f;
+float Kd_theta = 0.2f;
 
 // ---- Speed Loop ----
-float Kp_speed = 0.8;
-float Kd_speed = 0.0;
+float Kp_speed = 0.8f;
+float Kd_speed = 0.0f;
 
 // ---- Balance Angle ----
-float theta_eq = 1.56;  // upright equilibrium angle 
+float theta_eq = 1.56f;
 
-// ---- Sampling Period ----
-float Te = 0.005;   // 5 ms
+// ================= Online Tuning System =================
 
-// ================= Online Tuning System ==============
+void printParameters()
+{
+    Serial.println("---- Current Parameters ----");
+    Serial.print("Tau(ms): ");   Serial.println(Tau);
+    Serial.print("Te(ms): ");    Serial.println(Te);
+    Serial.print("alpha: ");     Serial.println(imu.getAlpha(), 6);
+
+    Serial.print("KpT: ");       Serial.println(Kp_theta);
+    Serial.print("KdT: ");       Serial.println(Kd_theta);
+    Serial.print("KpS: ");       Serial.println(Kp_speed);
+    Serial.print("KdS: ");       Serial.println(Kd_speed);
+    Serial.print("theta_eq: ");  Serial.println(theta_eq, 6);
+    Serial.println("----------------------------");
+}
+
+void applyCompatibilityUpdate()
+{
+    imu.setTeMs(Te);
+    imu.setTauMs(Tau);
+}
 
 void reception(char ch)
 {
@@ -37,36 +63,78 @@ void reception(char ch)
         String cmd;
         String value;
 
-        if (spaceIndex != -1)
+        if (spaceIndex == -1)
         {
-            cmd   = buffer.substring(0, spaceIndex);
-            value = buffer.substring(spaceIndex + 1);
-            float v = value.toFloat();
+            cmd = buffer;
 
-            if (cmd == "KpT")   Kp_theta = v;
-            if (cmd == "KdT")   Kd_theta = v;
-            if (cmd == "KpS")   Kp_speed = v;
-            if (cmd == "KdS")   Kd_speed = v;
-            if (cmd == "theta") theta_eq = v;
+            if (cmd == "show")
+            {
+                printParameters();
+            }
 
-            // Safety saturation for parameters
-            Kp_theta = constrain(Kp_theta, 0, 500);
-            Kd_theta = constrain(Kd_theta, 0, 10);
-            Kp_speed = constrain(Kp_speed, 0, 10);
-            Kd_speed = constrain(Kd_speed, 0, 10);
+            buffer = "";
+            return;
+        }
+
+        cmd   = buffer.substring(0, spaceIndex);
+        value = buffer.substring(spaceIndex + 1);
+        float v = value.toFloat();
+
+        // ===== Old platform compatible commands =====
+        if (cmd == "Tau")
+        {
+            Tau = v;
+            Tau = constrain(Tau, 1.0f, 10000.0f);
+            applyCompatibilityUpdate();
 
             Serial.print("Updated: ");
             Serial.println(buffer);
         }
-        else if (buffer == "show")
+        else if (cmd == "Te")
         {
-            Serial.println("---- Current Parameters ----");
-            Serial.print("KpT: "); Serial.println(Kp_theta);
-            Serial.print("KdT: "); Serial.println(Kd_theta);
-            Serial.print("KpS: "); Serial.println(Kp_speed);
-            Serial.print("KdS: "); Serial.println(Kd_speed);
-            Serial.print("theta_eq: "); Serial.println(theta_eq);
-            Serial.println("----------------------------");
+            Te = v;
+            Te = constrain(Te, 1.0f, 100.0f);
+            applyCompatibilityUpdate();
+
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+
+        // ===== New extended tuning commands =====
+        else if (cmd == "KpT")
+        {
+            Kp_theta = constrain(v, 0.0f, 500.0f);
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+        else if (cmd == "KdT")
+        {
+            Kd_theta = constrain(v, 0.0f, 20.0f);
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+        else if (cmd == "KpS")
+        {
+            Kp_speed = constrain(v, 0.0f, 20.0f);
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+        else if (cmd == "KdS")
+        {
+            Kd_speed = constrain(v, 0.0f, 20.0f);
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+        else if (cmd == "theta")
+        {
+            theta_eq = v;
+            Serial.print("Updated: ");
+            Serial.println(buffer);
+        }
+        else
+        {
+            Serial.print("Unknown command: ");
+            Serial.println(buffer);
         }
 
         buffer = "";
@@ -82,12 +150,11 @@ void reception(char ch)
 void controlTask(void *param)
 {
     TickType_t lastWake = xTaskGetTickCount();
-    float last_speed_error = 0;
+    float last_speed_error = 0.0f;
 
     while (1)
     {
-        // ========= 1. Read Sensors =========
-
+        // 1. Read sensors
         float theta = imu.getAngle();
         float gyro  = imu.getGyroZ();
 
@@ -95,44 +162,38 @@ void controlTask(void *param)
 
         float v_left  = encodeur.getSpeed_L();
         float v_right = encodeur.getSpeed_R();
-        float v_mean  = 0.5 * (v_left + v_right);
+        float v_mean  = 0.5f * (v_left + v_right);
 
-        // ========= 2. Speed Loop =========
+        // 2. Speed loop
+        float Te_s = Te / 1000.0f;
 
         float speed_error = -v_mean;   // target speed = 0
-
-        float d_speed = (speed_error - last_speed_error) / Te;
+        float d_speed = (speed_error - last_speed_error) / Te_s;
         last_speed_error = speed_error;
 
         float theta_corr =
             Kp_speed * speed_error +
             Kd_speed * d_speed;
 
-        // Limit correction to ±3 degrees
         theta_corr = constrain(theta_corr,
-                               -3.0 * DEG_TO_RAD,
-                                3.0 * DEG_TO_RAD);
+                               -3.0f * DEG_TO_RAD,
+                                3.0f * DEG_TO_RAD);
 
-        // ========= 3. Angle Loop =========
-
+        // 3. Angle loop
         float theta_ref = theta_eq + theta_corr;
-
         float error_theta = theta_ref - theta;
 
         float u =
             Kp_theta * error_theta
             - Kd_theta * gyro;
 
-        // ========= 4. Output Saturation =========
+        // 4. Output saturation
+        u = constrain(u, -500.0f, 500.0f);
 
-        u = constrain(u, -500, 500);
-
-        // ========= 5. Motor Output =========
-
+        // 5. Motor output
         pwm.setSpeed(-(int)u);
 
-        vTaskDelayUntil(&lastWake,
-                        pdMS_TO_TICKS(5));
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS((uint32_t)Te));
     }
 }
 
@@ -145,7 +206,13 @@ void setup()
 
     Serial.println("Balance Control System Ready");
 
-    imu.begin();
+    if (!imu.begin())
+    {
+        Serial.println("MPU6050 not found!");
+        while (1) { delay(10); }
+    }
+
+    applyCompatibilityUpdate();
     imu.startTask();
 
     encodeur.begin();
@@ -157,6 +224,8 @@ void setup()
                 NULL,
                 5,
                 NULL);
+
+    printParameters();
 }
 
 void loop()

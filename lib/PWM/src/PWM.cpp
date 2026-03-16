@@ -1,10 +1,13 @@
 #include "PWM.h"
 
-// ================= Create Fonction =================
+// ================= Constructor =================
 PWM::PWM(int deadLeft, int deadRight)
 {
     DEAD_L = deadLeft;
     DEAD_R = deadRight;
+
+    gainLeft = 1.0f;
+    gainRight = 1.0f;
 }
 
 // ================= Init =================
@@ -21,7 +24,7 @@ void PWM::begin()
     ledcAttachPin(D_IN2, CH_D2);
 }
 
-// ================= symmetric drive =================
+// ================= Symmetric drive =================
 void PWM::driveLeft(int alpha)
 {
     alpha = constrain(alpha, -ALPHA_MAX, ALPHA_MAX);
@@ -58,11 +61,39 @@ int PWM::deadzoneShift(int u, int D)
     return constrain(u, -PWM_MAX, PWM_MAX);
 }
 
+// ================= Gain setters =================
+void PWM::setGainLeft(float g)
+{
+    gainLeft = constrain(g, 0.5f, 1.5f);
+}
+
+void PWM::setGainRight(float g)
+{
+    gainRight = constrain(g, 0.5f, 1.5f);
+}
+
+float PWM::getGainLeft()
+{
+    return gainLeft;
+}
+
+float PWM::getGainRight()
+{
+    return gainRight;
+}
+
 // ================= Outside interface =================
 void PWM::setSpeed(int speed)
 {
-    int speed_l = constrain(deadzoneShift(speed, DEAD_L), -1000, 1000);
-    int speed_r = constrain(deadzoneShift(speed, DEAD_R), -1000, 1000);
+    int speed_l = deadzoneShift(speed, DEAD_L);
+    int speed_r = deadzoneShift(speed, DEAD_R);
+
+    // apply left/right correction
+    speed_l = (int)(speed_l * gainLeft);
+    speed_r = (int)(speed_r * gainRight);
+
+    speed_l = constrain(speed_l, -1000, 1000);
+    speed_r = constrain(speed_r, -1000, 1000);
 
     int alpha_l = map(speed_l,
                       -1000, 1000,

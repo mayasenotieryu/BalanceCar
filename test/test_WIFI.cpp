@@ -1,141 +1,109 @@
 #include <Arduino.h>
+#include "IMU.h"
+#include "Encodeur.h"
+#include "PWM.h"
+#include "webserver.h"
+#include "wifi_ap.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_system.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
+volatile float web_angle = 0;
+volatile float web_speed = 0;
 
-#include "lwip/err.h"
-#include "lwip/sys.h"
-#include "esp_netif.h"
-#include "mdns.h"
+// ================= Object =================
+IMU imu;
+Encodeur encodeur;
+PWM pwm(470, 430);
 
-#include <string.h>
+// ================= Balance Para =================
+float Kp_theta = 180.0;
+float Kd_theta = 0.2;
 
-static const char *TAG = "wifi_ap";
+float Kp_speed = 0.8;
+float Kd_speed = 0.0;
 
-/* ================== AP 配置 ================== */
-wifi_config_t wifi_config;
+float theta_eq = 1.56;
 
-/* ================== 事件回调声明 ================== */
-void on_wifi_ap_start(void *arg, esp_event_base_t event_base,
-                      int32_t event_id, void *event_data);
+float Te = 0.005;
 
-void on_client_connected(void *arg, esp_event_base_t event_base,
-                         int32_t event_id, void *event_data);
+// ================= Web var =================
+volatile int joy_x = 0;
+volatile int joy_y = 0;
 
-void on_client_disconnected(void *arg, esp_event_base_t event_base,
-                            int32_t event_id, void *event_data);
-
-/* ================== mDNS 初始化 ================== */
-void mdns_setup()
+// ================= ControlTask =================
+void controlTask(void *param)
 {
-    mdns_init();
-    mdns_hostname_set("zwang");
-    mdns_instance_name_set("ESP32 SoftAP Device");
+    TickType_t lastWake = xTaskGetTickCount();
 
-    ESP_LOGI(TAG, "mDNS 已启动: http://zwang.local");
+    float last_speed_error = 0;
+
+    while (1)
+    {
+        float theta = imu.getAngle();
+        float gyro  = imu.getGyroZ();
+
+        encodeur.update();
+
+        float v_left  = encodeur.getSpeed_L();
+        float v_right = encodeur.getSpeed_R();
+        float v_mean  = 0.5 * (v_left + v_right);
+
+        // ===== 摇杆控制速度 =====
+        float v_cons = joy_y * 0.01;
+
+        float speed_error = v_cons - v_mean;
+
+        float d_speed = (speed_error - last_speed_error) / Te;
+        last_speed_error = speed_error;
+
+        float theta_corr =
+            Kp_speed * speed_error +
+            Kd_speed * d_speed;
+
+        theta_corr = constrain(theta_corr,
+                               -3.0 * DEG_TO_RAD,
+                                3.0 * DEG_TO_RAD);
+
+        float theta_ref = theta_eq + theta_corr;
+
+        float error_theta = theta_ref - theta;
+
+        float u =
+            Kp_theta * error_theta
+            - Kd_theta * gyro;
+
+        u = constrain(u, -500, 500);
+
+        pwm.setSpeed(-(int)u);
+        
+        web_angle = theta;
+        web_speed = v_mean*100;
+        
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5));
+    }
 }
 
-/* ================== WiFi 初始化 ================== */
-void wifi_init_softap()
-{
-    esp_netif_init();
-    esp_event_loop_create_default();
-
-    esp_netif_create_default_wifi_ap();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-
-    memset(&wifi_config, 0, sizeof(wifi_config));
-
-    strcpy((char *)wifi_config.ap.ssid, "zwang");
-    strcpy((char *)wifi_config.ap.password, "12345678");
-
-    wifi_config.ap.ssid_len = 0;
-    wifi_config.ap.channel = 1;
-    wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    wifi_config.ap.max_connection = 4;
-
-    esp_event_handler_instance_register(
-        WIFI_EVENT,
-        WIFI_EVENT_AP_START,
-        &on_wifi_ap_start,
-        NULL,
-        NULL);
-
-    esp_event_handler_instance_register(
-        WIFI_EVENT,
-        WIFI_EVENT_AP_STACONNECTED,
-        &on_client_connected,
-        NULL,
-        NULL);
-
-    esp_event_handler_instance_register(
-        WIFI_EVENT,
-        WIFI_EVENT_AP_STADISCONNECTED,
-        &on_client_disconnected,
-        NULL,
-        NULL);
-
-    esp_wifi_set_mode(WIFI_MODE_AP);
-    esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
-    esp_wifi_start();
-
-    ESP_LOGI(TAG, "SoftAP 启动完成");
-}
-
-/* ================== 回调函数 ================== */
-
-void on_wifi_ap_start(void *arg, esp_event_base_t event_base,
-                      int32_t event_id, void *event_data)
-{
-    ESP_LOGI(TAG, "AP 已启动，等待客户端连接...");
-
-    mdns_setup();
-}
-
-void on_client_connected(void *arg, esp_event_base_t event_base,
-                         int32_t event_id, void *event_data)
-{
-    wifi_event_ap_staconnected_t *event =
-        (wifi_event_ap_staconnected_t *)event_data;
-
-    ESP_LOGI(TAG,
-             "设备连接 MAC: " MACSTR " AID:%d",
-             MAC2STR(event->mac),
-             event->aid);
-}
-
-void on_client_disconnected(void *arg, esp_event_base_t event_base,
-                            int32_t event_id, void *event_data)
-{
-    wifi_event_ap_stadisconnected_t *event =
-        (wifi_event_ap_stadisconnected_t *)event_data;
-
-    ESP_LOGI(TAG,
-             "设备断开 MAC: " MACSTR " AID:%d",
-             MAC2STR(event->mac),
-             event->aid);
-}
-
-/* ================== Arduino 主程序 ================== */
-
+// ================= Init =================
 void setup()
 {
     Serial.begin(115200);
-    delay(2000);
 
-    Serial.println("ESP32 PROGRAM START");
+    imu.begin();
+    imu.startTask();
 
+    encodeur.begin();
+    pwm.begin();
+    
     wifi_init_softap();
+    start_webserver(&joy_x, &joy_y);
+
+    xTaskCreate(controlTask,
+                "control",
+                4096,
+                NULL,
+                5,
+                NULL);
 }
 
 void loop()
 {
-    delay(1000);
+
 }

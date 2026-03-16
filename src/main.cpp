@@ -2,38 +2,110 @@
 #include "IMU.h"
 #include "Encodeur.h"
 #include "PWM.h"
-#include "webserver.h"
-#include "wifi_ap.h"
 
-volatile float web_angle = 0;
-volatile float web_speed = 0;
-
-// ================= Object =================
 IMU imu;
 Encodeur encodeur;
-PWM pwm(470, 430);
+PWM pwm(600, 570);
 
-// ================= Balance Para =================
-float Kp_theta = 180.0;
-float Kd_theta = 0.2;
+// old-platform compatible parameters
+float Te = 10.0f;         // ms
+float Tau = 1000.0f;     // ms
 
-float Kp_speed = 0.8;
-float Kd_speed = 0.0;
+// control parameters
+float Kp_theta = 20.0f;
+float Kd_theta = 0.0f;
 
-float theta_eq = 1.56;
+float Kp_speed = 0.0f;
+float Kd_speed = 0.0f;
 
-float Te = 0.005;
+float theta_eq = 1.56f;
 
-// ================= Web var =================
-volatile int joy_x = 0;
-volatile int joy_y = 0;
+// debug values for the Qt plotting tool
+volatile float dbg_theta = 0.0f;
+volatile float dbg_gyro  = 0.0f;
+volatile float dbg_speed = 0.0f;
+volatile float dbg_u     = 0.0f;
 
-// ================= ControlTask =================
+void applyCompatibilityUpdate()
+{
+    imu.setTeMs(Te);
+    imu.setTauMs(Tau);
+}
+
+void reception(char ch)
+{
+    static String buffer = "";
+
+    if (ch == '\n' || ch == '\r')
+    {
+        if (buffer.length() == 0)
+            return;
+
+        int spaceIndex = buffer.indexOf(' ');
+        if (spaceIndex == -1)
+        {
+            buffer = "";
+            return;
+        }
+
+        String cmd   = buffer.substring(0, spaceIndex);
+        String value = buffer.substring(spaceIndex + 1);
+        float v = value.toFloat();
+
+        if (cmd == "Tau")
+        {
+            Tau = constrain(v, 1.0f, 10000.0f);
+            applyCompatibilityUpdate();
+        }
+        else if (cmd == "Te")
+        {
+            Te = constrain(v, 1.0f, 100.0f);
+            applyCompatibilityUpdate();
+        }
+        else if (cmd == "KpT")
+        {
+            Kp_theta = constrain(v, 0.0f, 100.0f);
+        }
+        else if (cmd == "KdT")
+        {
+            Kd_theta = constrain(v, 0.0f, 20.0f);
+        }
+        else if (cmd == "KpS")
+        {
+            Kp_speed = constrain(v, 0.0f, 100.0f);
+        }
+        else if (cmd == "KdS")
+        {
+            Kd_speed = constrain(v, 0.0f, 20.0f);
+        }
+        else if (cmd == "theta")
+        {
+            theta_eq = v;
+        }
+        else if (cmd == "GL")
+        {
+            pwm.setGainLeft(v);
+        }
+        else if (cmd == "GR")
+        {
+            pwm.setGainRight(v);
+        }
+
+        buffer = "";
+    }
+    else
+    {
+        buffer += ch;
+
+        if (buffer.length() > 64)
+            buffer = "";
+    }
+}
+
 void controlTask(void *param)
 {
     TickType_t lastWake = xTaskGetTickCount();
-
-    float last_speed_error = 0;
+    float last_speed_error = 0.0f;
 
     while (1)
     {
@@ -44,14 +116,12 @@ void controlTask(void *param)
 
         float v_left  = encodeur.getSpeed_L();
         float v_right = encodeur.getSpeed_R();
-        float v_mean  = 0.5 * (v_left + v_right);
+        float v_mean  = 0.5f * (v_left + v_right);
 
-        // ===== 摇杆控制速度 =====
-        float v_cons = joy_y * 0.01;
+        float Te_s = Te / 1000.0f;
 
-        float speed_error = v_cons - v_mean;
-
-        float d_speed = (speed_error - last_speed_error) / Te;
+        float speed_error = -v_mean;
+        float d_speed = (speed_error - last_speed_error) / Te_s;
         last_speed_error = speed_error;
 
         float theta_corr =
@@ -59,51 +129,81 @@ void controlTask(void *param)
             Kd_speed * d_speed;
 
         theta_corr = constrain(theta_corr,
-                               -3.0 * DEG_TO_RAD,
-                                3.0 * DEG_TO_RAD);
+                               -2.5f * DEG_TO_RAD,
+                                2.5f * DEG_TO_RAD);
 
         float theta_ref = theta_eq + theta_corr;
-
         float error_theta = theta_ref - theta;
 
         float u =
             Kp_theta * error_theta
             - Kd_theta * gyro;
 
-        u = constrain(u, -500, 500);
+        u = constrain(u, -1000.0f, 1000.0f);
 
         pwm.setSpeed(-(int)u);
-        
-        web_angle = theta;
-        web_speed = v_mean*100;
-        
-        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5));
+
+        dbg_theta = theta;
+        dbg_gyro  = gyro;
+        dbg_speed = v_mean;
+        dbg_u     = u;
+
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS((uint32_t)Te));
     }
 }
 
-// ================= Init =================
 void setup()
 {
     Serial.begin(115200);
+    delay(1000);
 
-    imu.begin();
+    if (!imu.begin())
+    {
+        while (1) { delay(10); }
+    }
+
+    applyCompatibilityUpdate();
     imu.startTask();
 
     encodeur.begin();
     pwm.begin();
-    
-    wifi_init_softap();
-    start_webserver(&joy_x, &joy_y);
 
-    xTaskCreate(controlTask,
-                "control",
-                4096,
-                NULL,
-                5,
-                NULL);
+    xTaskCreate(
+        controlTask,
+        "control",
+        4096,
+        NULL,
+        5,
+        NULL
+    );
 }
 
 void loop()
 {
+    while (Serial.available() > 0)
+    {
+        reception((char)Serial.read());
+    }
 
+    // ===== Display scaling factors =====
+    static float disp_theta_gain = 0.5f;   // angle display gain
+    static float disp_gyro_gain  = 0.5f;   // gyro display gain
+    static float disp_speed_gain = 40.0f;  // speed display gain
+    static float disp_u_gain     = 0.2f;  // control output display gain
+
+    // ===== Display variables =====
+    float theta_plot = dbg_theta * 180.0f / PI * disp_theta_gain; // deg
+    float gyro_plot  = dbg_gyro  * 180.0f / PI * disp_gyro_gain;  // scaled deg/s
+    float speed_plot = dbg_speed * disp_speed_gain;               // scaled speed
+    float u_plot     = dbg_u     * disp_u_gain;                   // scaled control
+
+    Serial.print(theta_plot, 6);
+    Serial.print(' ');
+    Serial.print(gyro_plot, 6);
+    Serial.print(' ');
+    Serial.print(speed_plot, 6);
+    Serial.print(' ');
+    Serial.println(u_plot, 6);
+
+    delay((uint32_t)Te);
 }

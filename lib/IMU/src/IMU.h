@@ -12,9 +12,12 @@ public:
     bool begin();
     void startTask();
 
-    float getAngle();      // 融合角度
-    float getAccAngle();   // 加速度角
-    float getGyroZ();      // 陀螺Z轴角速度
+    float getAngle();
+    float getAccAngle();
+    float getGyroZ();
+
+    void setTeMs(float te_ms);
+    void setTauMs(float tau_ms);
 
 private:
     static void taskWrapper(void *param);
@@ -22,13 +25,13 @@ private:
 
     Adafruit_MPU6050 mpu;
 
-    float tetagr;      // 加速度角
-    float tetaF;       // 融合角
+    float tetagr;
+    float tetaF;
+    float lastGyroZ;
 
-    float lastGyroZ;   // 最近一次陀螺Z轴数据
-
-    float Te;          // 采样周期 ms
-    float alpha;       // 互补滤波系数
+    float Te_ms;
+    float Tau_ms;
+    float alpha;
 
     volatile bool newData;
 };
