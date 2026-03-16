@@ -1,11 +1,8 @@
 #include "PWM.h"
 
 // ================= Constructor =================
-PWM::PWM(int deadLeft, int deadRight)
+PWM::PWM()
 {
-    DEAD_L = deadLeft;
-    DEAD_R = deadRight;
-
     gainLeft = 1.0f;
     gainRight = 1.0f;
 }
@@ -47,20 +44,6 @@ void PWM::driveRight(int alpha)
     ledcWrite(CH_D2, in2);
 }
 
-// ================= Deadzone =================
-int PWM::deadzoneShift(int u, int D)
-{
-    if (u == 0)
-        return 0;
-
-    if (u > 0)
-        u = u + D;
-    else
-        u = u - D;
-
-    return constrain(u, -PWM_MAX, PWM_MAX);
-}
-
 // ================= Gain setters =================
 void PWM::setGainLeft(float g)
 {
@@ -85,21 +68,25 @@ float PWM::getGainRight()
 // ================= Outside interface =================
 void PWM::setSpeed(int speed)
 {
-    int speed_l = deadzoneShift(speed, DEAD_L);
-    int speed_r = deadzoneShift(speed, DEAD_R);
+    setSpeedLR(speed, speed);
+}
 
-    // apply left/right correction
-    speed_l = (int)(speed_l * gainLeft);
-    speed_r = (int)(speed_r * gainRight);
+void PWM::setSpeedLR(int speedL, int speedR)
+{
+    speedL = constrain(speedL, -1000, 1000);
+    speedR = constrain(speedR, -1000, 1000);
 
-    speed_l = constrain(speed_l, -1000, 1000);
-    speed_r = constrain(speed_r, -1000, 1000);
+    int cmdL = (int)(speedL * gainLeft);
+    int cmdR = (int)(speedR * gainRight);
 
-    int alpha_l = map(speed_l,
+    cmdL = constrain(cmdL, -1000, 1000);
+    cmdR = constrain(cmdR, -1000, 1000);
+
+    int alpha_l = map(cmdL,
                       -1000, 1000,
                       -ALPHA_MAX, ALPHA_MAX);
 
-    int alpha_r = map(speed_r,
+    int alpha_r = map(cmdR,
                       -1000, 1000,
                       -ALPHA_MAX, ALPHA_MAX);
 
