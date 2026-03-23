@@ -12,8 +12,8 @@ float Te = 5.0f;         // ms
 float Tau = 1000.0f;     // ms
 
 // angle-loop parameters
-float Kp_theta = 0.01f;
-float Kd_theta = 0.0f;
+float Kp_theta = 0*0.01;
+float Kd_theta = 0.0;
 
 // speed-loop parameters
 float Kp_speed = 0.0f;
@@ -23,14 +23,22 @@ float Kd_speed = 0.0f;
 float theta_eq = 1.56f;
 
 // maximum allowed tilt angle (deg)
+float theta_err_deg_abs = 0.0f;
 float theta_max_deg = 30.0f;
 
 // EC-layer deadzone compensation for left/right motors
-float C0_L = 0.0f;
-float C0_R = 0.0f;
+float C0_L = 0.199;
+float C0_R = 0.196;
 
 // EC range
-float ec_max = 0.45f;
+float ec = 0.0;
+float ec_max = 0.45;
+float ec_corr_L = 0.0;
+float ec_corr_R = 0.0;
+
+// Motor Control
+int motor_cmd_L = 0;
+int motor_cmd_R = 0;
 
 // debug values for the Qt plotting tool
 volatile float dbg_theta = 0.0f;
@@ -52,10 +60,10 @@ void applyCompatibilityUpdate()
 // =====================================================
 float ecCompensate(float ec, float C0)
 {
-    if (fabs(ec) < 1e-4f)
-        return 0.0f;
+    //if (fabs(ec) < 0.0001)
+    //    return 0.0;
 
-    if (ec > 0.0f)
+    if (ec >= 0.0)
         return ec + C0;
     else
         return ec - C0;
@@ -69,8 +77,8 @@ int pwmcalcul(float ec)
 {
     ec = constrain(ec, -ec_max, ec_max);
 
-    float pwm_value = (ec / ec_max) * 1000.0f;
-    pwm_value = constrain(pwm_value, -1000.0f, 1000.0f);
+    float pwm_value = (ec / ec_max) * 1000.0;
+    pwm_value = constrain(pwm_value, -1000.0, 1000.0);
 
     return (int)pwm_value;
 }
@@ -107,11 +115,11 @@ void reception(char ch)
         }
         else if (cmd == "KpT")
         {
-            Kp_theta = constrain(v, 0.0f, 1.0f);
+            Kp_theta = constrain(v, 0.0f, 0.01);
         }
         else if (cmd == "KdT")
         {
-            Kd_theta = constrain(v, 0.0f, 1.0f);
+            Kd_theta = constrain(v, 0.0f, 0.005);
         }
         else if (cmd == "KpS")
         {
@@ -165,8 +173,8 @@ void controlTask(void *param)
         float v_mean  = 0.5f * (v_left + v_right);
 
         // ===== safety tilt limit =====
-        float theta_err_deg_abs = fabs(theta - theta_eq) * 180.0f / PI;
-        if (theta_err_deg_abs > theta_max_deg)
+        theta_err_deg_abs = fabs(theta - theta_eq) * 180.0f / PI;
+        if (theta_err_deg_abs > theta_max_deg)   // max 30 degrees
         {
             pwm.stop();
 
@@ -187,8 +195,8 @@ void controlTask(void *param)
         last_speed_error = speed_error;
 
         float theta_corr =
-            Kp_speed * speed_error +
-            Kd_speed * d_speed;
+            (Kp_speed * speed_error) +
+            (Kd_speed * d_speed);
 
         theta_corr = constrain(theta_corr,
                                -3.0f * DEG_TO_RAD,
@@ -202,20 +210,20 @@ void controlTask(void *param)
         float gyro_deg = gyro * 180.0f / PI;
 
         // raw controller output at EC layer
-        float ec =
-            Kp_theta * error_theta_deg
-            - Kd_theta * gyro_deg;
+        ec =
+            (Kp_theta * error_theta_deg)
+            - (Kd_theta * gyro_deg);
 
         // limit EC
         ec = constrain(ec, -ec_max, ec_max);
 
         // independent EC compensation for left/right motors
-        float ec_corr_L = ecCompensate(ec, C0_L);
-        float ec_corr_R = ecCompensate(ec, C0_R);
+        ec_corr_L = ecCompensate(ec, C0_L);
+        ec_corr_R = ecCompensate(ec, C0_R);
 
         // unified mapping for each side
-        int motor_cmd_L = pwmcalcul(ec_corr_L);
-        int motor_cmd_R = pwmcalcul(ec_corr_R);
+        motor_cmd_L = pwmcalcul(ec_corr_L);
+        motor_cmd_R = pwmcalcul(ec_corr_R);
 
         pwm.setSpeedLR(-motor_cmd_L, -motor_cmd_R);
 
@@ -262,6 +270,7 @@ void loop()
     }
 
     // ===== Display scaling factors =====
+
     static float disp_theta_gain = 0.5f;
     static float disp_gyro_gain  = 0.5f;
     static float disp_speed_gain = 40.0f;
@@ -279,7 +288,7 @@ void loop()
     Serial.print(' ');
     Serial.print(speed_plot, 6);
     Serial.print(' ');
-    Serial.println(u_plot, 6);
+    Serial.println(motor_cmd_L);
 
     delay((uint32_t)Te);
 }
